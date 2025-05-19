@@ -1,0 +1,6 @@
+- Заменить FAISS на Qdrant или Weaviate при росте данных
+- Использовать LangChain, LlamaIndex для гибкости
+- Добавить user feedback loop (для активного обучения)
+- Кэшировать частые запросы
+- Логировать ошибки и запросы (Prometheus/Grafana)
+
