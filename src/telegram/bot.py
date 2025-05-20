@@ -1,10 +1,14 @@
 import os
+import sys
 import logging
 import requests
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, CommandHandler
 from telegram.helpers import escape_markdown
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from utils.logger import log_interaction
+from utils.filters import is_valid_query
 
 load_dotenv()
 
@@ -25,7 +29,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Я найду информацию в базе знаний и постараюсь ответить максимально точно.\n"
         "Если возникнут проблемы — напишите разработчику. Удачи!"
     )
-    await update.message.reply_markdown_v2(welcome_text)
+    safe_welcome_text = escape_markdown(welcome_text, version=2)
+    await update.message.reply_markdown_v2(safe_welcome_text)
 
 # === Обработка запроса ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -33,6 +38,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not query:
         await update.message.reply_text("Пожалуйста, отправьте текст вопроса.")
+        return
+
+    if not is_valid_query(query):
+        await update.message.reply_text("Пожалуйста, сформулируйте более конкретный вопрос.")
         return
 
     try:
@@ -47,6 +56,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         source_text = "\n".join([f"🔗 {s}" for s in escaped_sources]) if sources else ""
 
         reply = f"*Ответ:*\n{escaped_answer}\n\n*Источники:*\n{source_text}"
+        log_interaction(
+            query=query,
+            answer=answer,
+            sources=[s["url"] for s in sources],
+            source="telegram",
+            user_id=update.effective_user.id
+        )
         await update.message.reply_markdown_v2(reply)
     except Exception as e:
         logger.exception("Ошибка при обработке запроса")
