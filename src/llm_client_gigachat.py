@@ -3,8 +3,6 @@ import time
 import requests
 from typing import Optional
 from dotenv import load_dotenv
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 load_dotenv()
 
 # Переменные можно загрузить из .env
@@ -13,6 +11,18 @@ assert GIGACHAT_AUTH_KEY, "Не задан GIGACHAT_AUTH_KEY"
 
 OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 GIGACHAT_API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+
+# Разрешённые домены для запросов (безопасность)
+ALLOWED_HOSTS = {
+    "ngw.devices.sberbank.ru",
+    "gigachat.devices.sberbank.ru"
+}
+
+def validate_url(url: str) -> bool:
+    """Проверяет, что URL принадлежит разрешённым хостам"""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    return parsed.hostname in ALLOWED_HOSTS
 
 # Кэш токена
 access_token = None
@@ -25,6 +35,11 @@ def get_access_token() -> str:
     if access_token and time.time() < token_expiry - 30:
         return access_token
 
+    # Валидация URL перед запросом
+    if not validate_url(OAUTH_URL):
+        print(f"[!] Ошибка: недопустимый OAuth URL")
+        return None
+
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
@@ -34,7 +49,8 @@ def get_access_token() -> str:
     data = {"scope": "GIGACHAT_API_PERS"}
 
     try:
-        response = requests.request("POST", OAUTH_URL, headers=headers, data=data, verify=False)
+        # БЕЗОПАСНОСТЬ: включена проверка SSL
+        response = requests.request("POST", OAUTH_URL, headers=headers, data=data, verify=True, timeout=30)
         response.raise_for_status()
         resp_json = response.json()
 
@@ -43,14 +59,24 @@ def get_access_token() -> str:
         token_expiry = time.time() + expires_in
 
         return access_token
-    except Exception as e:
+    except requests.exceptions.SSLError as e:
+        print(f"[!] Ошибка SSL сертификата: {e}")
+        return None
+    except requests.exceptions.RequestException as e:
         print(f"[!] Ошибка получения токена: {e}")
+        return None
+    except Exception as e:
+        print(f"[!] Неожиданная ошибка: {e}")
         return None
 
 def generate_answer_with_gigachat(query: str, context: str) -> str:
     token = get_access_token()
     if not token:
         return "Ошибка авторизации в GigaChat."
+
+    # Валидация URL перед запросом
+    if not validate_url(GIGACHAT_API_URL):
+        return "Ошибка: недопустимый API URL"
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -71,11 +97,18 @@ def generate_answer_with_gigachat(query: str, context: str) -> str:
     }
 
     try:
-        response = requests.post(GIGACHAT_API_URL, headers=headers, json=payload, verify=False)
+        # БЕЗОПАСНОСТЬ: включена проверка SSL
+        response = requests.post(GIGACHAT_API_URL, headers=headers, json=payload, verify=True, timeout=30)
         response.raise_for_status()
         result = response.json()
         return result["choices"][0]["message"]["content"].strip()
-    except Exception as e:
+    except requests.exceptions.SSLError as e:
+        print(f"[!] Ошибка SSL сертификата: {e}")
+        return "Ошибка безопасности соединения."
+    except requests.exceptions.RequestException as e:
         print(f"[!] Ошибка запроса к GigaChat: {e}")
         return "Ошибка генерации ответа от модели."
+    except Exception as e:
+        print(f"[!] Неожиданная ошибка: {e}")
+        return "Произошла непредвиденная ошибка."
 
